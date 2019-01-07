@@ -11,6 +11,9 @@ from stable_baselines.results_plotter import load_results, ts2xy
 from stable_baselines import DDPG
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec
 
+from print_versions import print_versions
+
+printVersions( ["Python", tf, np, gym, stable_baselines] )
 
 best_mean_reward, n_steps = -np.inf, 0
 
@@ -39,6 +42,8 @@ def callback(_locals, _globals):
   n_steps += 1
   return True
 
+
+env_names = ["LunarLanderContinuous-v2", "CarRacing-v0"]
 
 # Create log dir
 log_dir = "/tmp/gym/"

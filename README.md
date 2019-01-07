@@ -1,2 +1,2 @@
-# sb_experiments
-Experiments using Stable Baselines
+# Stable Baselines Experiments
+RL Experiments using [Stable Baselines](https://github.com/hill-a/stable-baselines).
