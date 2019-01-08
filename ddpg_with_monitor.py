@@ -12,10 +12,12 @@ from stable_baselines.results_plotter import load_results, ts2xy
 from stable_baselines import DDPG
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec
 
-from print_versions import print_versions
+from print_versions import printVersions
 
 import LLImage
 
+import tensorflow as tf
+import stable_baselines
 printVersions( ["Python", tf, np, gym, stable_baselines] )
 
 best_mean_reward, n_steps = -np.inf, 0
@@ -61,10 +63,12 @@ def test_env( model, env, env_name, render=False, count=1000 ):
             env.render()
     print( "{} mean rewards/episodes: {}\t{}".format( name, np.mean(reward_vec), episodes))
 
+num_procs = 1
+random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
 envs = []
 for env_name in env_names:
-    envs.append( make_atari_env(env_name, num_env=num_envs, seed=random_seed) )
+    envs.append( make_atari_env(env_name, num_env=num_procs, seed=random_seed) )
 
 param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
 model = DDPG(CnnPolicy, envs[0], param_noise=param_noise, memory_limit=int(1e6), verbose=0)
