@@ -10,14 +10,14 @@ def box_filter(env):
 
 allenv = list(gym.envs.registry.all())
 
-check = box_filter
+check = None # box_filter
 
 print( "{} environments".format( len(allenv) ) )
 print( "{}\t{}\t{}".format( "Env ID", "Obs Space", "Action Space" ) )
 for envspec in allenv:
     try:
         env = envspec.make()
-        if check is not None and check(env):
+        if check is None or check(env):
             print( "{}\t{}\t{}".format( 
                 envspec.id,
                 env.observation_space,
