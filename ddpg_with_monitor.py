@@ -63,12 +63,37 @@ def test_env( model, env, env_name, render=False, count=1000 ):
             env.render()
     print( "{} mean rewards/episodes: {}\t{}".format( name, np.mean(reward_vec), episodes))
 
+def make_atari_single_env(env_id, num_env, seed, wrapper_kwargs=None, start_index=0, allow_early_resets=True):
+    """
+    Create a wrapped, monitored SubprocVecEnv for Atari.
+    :param env_id: (str) the environment ID
+    :param num_env: (int) IGNORED
+    :param seed: (int) the inital seed for RNG
+    :param wrapper_kwargs: (dict) the parameters for wrap_deepmind function
+    :param start_index: (int) start rank index
+    :param allow_early_resets: (bool) allows early reset of the environment
+    :return: (Gym Environment) The atari environment
+    """
+    if wrapper_kwargs is None:
+        wrapper_kwargs = {}
+
+    def make_env(rank):
+        def _thunk():
+            env = make_atari(env_id)
+            env.seed(seed + rank)
+            env = Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
+                          allow_early_resets=allow_early_resets)
+            return wrap_deepmind(env, **wrapper_kwargs)
+        return _thunk
+    set_global_seeds(seed)
+    return DummyVecEnv([make_env(i + start_index) for i in range(num_env)])
+
 num_procs = 1
 random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
 envs = []
 for env_name in env_names:
-    envs.append( make_atari_env(env_name, num_env=num_procs, seed=random_seed) )
+    envs.append( make_atari_env(env_name, num_env=num_procs, seed=random_seed, wrapper_kwargs={"scale":True}) )
 
 param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
 model = DDPG(CnnPolicy, envs[0], param_noise=param_noise, memory_limit=int(1e6), verbose=0)
