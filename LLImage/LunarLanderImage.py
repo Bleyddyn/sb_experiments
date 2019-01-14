@@ -8,7 +8,8 @@ import gym
 from gym import spaces
 from gym.utils import seeding, EzPickle
 #from gym.envs.classic_control import rendering
-from LLImage import rendering
+from . import rendering
+#from LLImage import rendering
 
 # Rocket trajectory optimization is a classic topic in Optimal Control.
 #
@@ -84,7 +85,7 @@ class LunarLanderImage(gym.Env, EzPickle):
         EzPickle.__init__(self)
         self.seed()
 
-        self.viewer = rendering.Viewer(VIEWPORT_W, VIEWPORT_H, visible=False)
+        self.viewer = rendering.Viewer(VIEWPORT_W, VIEWPORT_H, SCALE, visible=False)
         self.viewer.set_bounds(0, VIEWPORT_W/SCALE, 0, VIEWPORT_H/SCALE)
         self.first_render = True
 
@@ -102,7 +103,11 @@ class LunarLanderImage(gym.Env, EzPickle):
             # Action is two floats [main engine, left-right engines].
             # Main engine: -1..0 off, 0..+1 throttle from 50% to 100% power. Engine can't work with less than 50% power.
             # Left-right:  -1.0..-0.5 fire left engine, +0.5..+1.0 fire right engine, -0.5..0.5 off
-            self.action_space = spaces.Box(-1, +1, (2,), dtype=np.float32)
+            # Added a NOOP action at the beginning to match the CarRacing environment
+            self.action_space = spaces.Box(-1, +1, (3,), dtype=np.float32)
+            self.noop_index = 0
+            self.main_index = 1
+            self.orient_index = 2
         else:
             # Nop, fire left engine, main engine, right engine
             self.action_space = spaces.Discrete(4)
@@ -217,7 +222,7 @@ class LunarLanderImage(gym.Env, EzPickle):
 
         self.drawlist = [self.lander] + self.legs
 
-        return self.step(np.array([0,0]) if self.continuous else 0)[0]
+        return self.step(np.array([0,0,0]) if self.continuous else 0)[0]
 
     def _create_particle(self, mass, x, y, ttl):
         p = self.world.CreateDynamicBody(
@@ -252,10 +257,10 @@ class LunarLanderImage(gym.Env, EzPickle):
         dispersion = [self.np_random.uniform(-1.0, +1.0) / SCALE for _ in range(2)]
 
         m_power = 0.0
-        if (self.continuous and action[0] > 0.0) or (not self.continuous and action==2):
+        if (self.continuous and action[self.main_index] > 0.0) or (not self.continuous and action==2):
             # Main engine
             if self.continuous:
-                m_power = (np.clip(action[0], 0.0,1.0) + 1.0)*0.5   # 0.5..1.0
+                m_power = (np.clip(action[self.main_index], 0.0,1.0) + 1.0)*0.5   # 0.5..1.0
                 assert m_power>=0.5 and m_power <= 1.0
             else:
                 m_power = 1.0
@@ -267,11 +272,11 @@ class LunarLanderImage(gym.Env, EzPickle):
             self.lander.ApplyLinearImpulse( (-ox*MAIN_ENGINE_POWER*m_power, -oy*MAIN_ENGINE_POWER*m_power), impulse_pos, True)
 
         s_power = 0.0
-        if (self.continuous and np.abs(action[1]) > 0.5) or (not self.continuous and action in [1,3]):
+        if (self.continuous and np.abs(action[self.orient_index]) > 0.5) or (not self.continuous and action in [1,3]):
             # Orientation engines
             if self.continuous:
-                direction = np.sign(action[1])
-                s_power = np.clip(np.abs(action[1]), 0.5,1.0)
+                direction = np.sign(action[self.orient_index])
+                s_power = np.clip(np.abs(action[self.orient_index]), 0.5,1.0)
                 assert s_power>=0.5 and s_power <= 1.0
             else:
                 direction = action-2
@@ -341,9 +346,11 @@ class LunarLanderImage(gym.Env, EzPickle):
             for f in obj.fixtures:
                 trans = f.body.transform
                 if type(f.shape) is circleShape:
-                    t = rendering.Transform(translation=trans*f.shape.pos)
-                    self.viewer.draw_circle(f.shape.radius, 20, color=obj.color1).add_attr(t)
-                    self.viewer.draw_circle(f.shape.radius, 20, color=obj.color2, filled=False, linewidth=2).add_attr(t)
+                    self.viewer.draw_circle( center=trans*f.shape.pos, radius=f.shape.radius, res=20, color=obj.color1)
+                    self.viewer.draw_circle( center=trans*f.shape.pos, radius=f.shape.radius, res=20, color=obj.color2, filled=False, linewidth=2)
+                    #t = rendering.Transform(translation=trans*f.shape.pos)
+                    #self.viewer.draw_circle(f.shape.radius, 20, color=obj.color1).add_attr(t)
+                    #self.viewer.draw_circle(f.shape.radius, 20, color=obj.color2, filled=False, linewidth=2).add_attr(t)
                 else:
                     path = [trans*v for v in f.shape.vertices]
                     self.viewer.draw_polygon(path, color=obj.color1)
@@ -362,6 +369,9 @@ class LunarLanderImage(gym.Env, EzPickle):
         if self.viewer is not None:
             self.viewer.close()
             self.viewer = None
+
+    def get_action_meanings(self):
+        return ['NOOP', 'MAIN', 'STEERING']
 
 class LunarLanderImageContinuous(LunarLanderImage):
     continuous = True
@@ -388,7 +398,7 @@ def heuristic(env, s):
         hover_todo = -(s[3])*0.5  # override to reduce fall speed, that's all we need after contact
 
     if env.continuous:
-        a = np.array( [hover_todo*20 - 1, -angle_todo*20] )
+        a = np.array( [0.0, hover_todo*20 - 1, -angle_todo*20] )
         a = np.clip(a, -1, +1)
     else:
         a = 0
@@ -402,17 +412,20 @@ def demo_heuristic_lander(env, seed=None, render=False):
     total_reward = 0
     steps = 0
     s = env.reset()
+    prev, r, done, info = env.step(np.array([0.0,0.0,0.0]))
     while True:
-        a = heuristic(env, s)
+        a = heuristic(env, info['state'])
         s, r, done, info = env.step(a)
         total_reward += r
+        diff = np.sum( prev - s )
 
         if render:
             still_open = env.render()
             if still_open == False: break
 
         if steps % 20 == 0 or done:
-            print("observations:", " ".join(["{:+0.2f}".format(x) for x in s]))
+            print("diffs: {}".format( diff ) )
+            print("observations:", " ".join(["{:+0.2f}".format(x) for x in info['state']]))
             print("step {} total_reward {:+0.2f}".format(steps, total_reward))
         steps += 1
         if done: break
@@ -420,6 +433,6 @@ def demo_heuristic_lander(env, seed=None, render=False):
 
 
 if __name__ == '__main__':
-    demo_heuristic_lander(LunarLander(), render=True)
+    demo_heuristic_lander(LunarLanderImageContinuous(), render=True)
     
     

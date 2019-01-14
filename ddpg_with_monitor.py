@@ -7,7 +7,10 @@ import matplotlib.pyplot as plt
 from stable_baselines.ddpg.policies import MlpPolicy
 from stable_baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from stable_baselines.common.cmd_util import make_atari_env
+from stable_baselines.common.atari_wrappers import make_atari, wrap_deepmind, NoopResetEnv, EpisodicLifeEnv, FireResetEnv, WarpFrame, ScaledFloatFrame, ClipRewardEnv, FrameStack
+from stable_baselines.common import set_global_seeds
 from stable_baselines.bench import Monitor
+from stable_baselines import logger
 from stable_baselines.results_plotter import load_results, ts2xy
 from stable_baselines import DDPG
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec
@@ -15,6 +18,7 @@ from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec
 from print_versions import printVersions
 
 import LLImage
+from custom_class import CustomMalpiPolicy, DDPGDKPolicy
 
 import tensorflow as tf
 import stable_baselines
@@ -88,15 +92,51 @@ def make_atari_single_env(env_id, num_env, seed, wrapper_kwargs=None, start_inde
     set_global_seeds(seed)
     return DummyVecEnv([make_env(i + start_index) for i in range(num_env)])
 
+def wrap_deepmind_fixed(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
+    """
+    Configure environment for DeepMind-style Atari.
+    :param env: (Gym Environment) the atari environment
+    :param episode_life: (bool) wrap the episode life wrapper
+    :param clip_rewards: (bool) wrap the reward clipping wrapper
+    :param frame_stack: (bool) wrap the frame stacking wrapper
+    :param scale: (bool) wrap the scaling observation wrapper
+    :return: (Gym Environment) the wrapped atari environment
+    """
+    if episode_life:
+        env = EpisodicLifeEnv(env)
+    if hasattr(env.unwrapped, 'get_action_meanings') and 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = WarpFrame(env)
+    if scale:
+        env = ScaledFloatFrame(env)
+    if clip_rewards:
+        env = ClipRewardEnv(env)
+    if frame_stack:
+        env = FrameStack(env, 4)
+    return env
+
+def make_env_simplified( env_id, seed, wrapper_kwargs=None, allow_early_resets=True):
+    env = gym.make(env_id)
+    #env = NoopResetEnv(env, noop_max=30)
+    #env = MaxAndSkipEnv(env, skip=4)
+    env.seed(seed)
+    env = Monitor(env, logger.get_dir(), allow_early_resets=allow_early_resets)
+    return wrap_deepmind_fixed(env, episode_life=False, **wrapper_kwargs)
+
+# Create log dir
+log_dir = "./logs/"
+#os.makedirs(log_dir, exist_ok=True)
+logger.configure(folder=log_dir, format_strs=['stdout', 'log', 'csv','tensorboard'])
+
 num_procs = 1
 random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
 envs = []
 for env_name in env_names:
-    envs.append( make_atari_env(env_name, num_env=num_procs, seed=random_seed, wrapper_kwargs={"scale":True}) )
+    envs.append( make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True}) )
 
 param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
-model = DDPG(CnnPolicy, envs[0], param_noise=param_noise, memory_limit=int(1e6), verbose=0)
+model = DDPG(DDPGDKPolicy, envs[0], param_noise=param_noise, memory_limit=int(1e5), verbose=0)
 
 epochs = 10
 steps_per_epoch = 10000
@@ -104,16 +144,13 @@ for epoch in range(epochs):
     for idx, env in enumerate(envs):
         model.set_env(env)
         print( "training {} for {} steps".format( env_names[idx], steps_per_epoch) )
-        model.learn(total_timesteps=steps_per_epoch)
+        model.learn(total_timesteps=steps_per_epoch, callback=callback)
         #model.save(model_path)
 
     for idx, env in enumerate(envs):
         test_env( model, env, env_names[idx] )
 
 """
-# Create log dir
-log_dir = "/tmp/gym/"
-os.makedirs(log_dir, exist_ok=True)
 
 # Create and wrap the environment
 env = gym.make('LunarLanderContinuous-v2')

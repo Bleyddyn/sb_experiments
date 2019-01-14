@@ -13,6 +13,7 @@ if "Apple" in sys.version:
 
 from gym.utils import reraise
 from gym import error
+import pygame
 
 try:
     import pyglet
@@ -26,6 +27,29 @@ except ImportError as e:
 
 import math
 import numpy as np
+
+""" Methods called from LunarLander
+        self.viewer = rendering.Viewer(VIEWPORT_W, VIEWPORT_H, visible=False)
+        self.viewer.set_bounds(0, VIEWPORT_W/SCALE, 0, VIEWPORT_H/SCALE)
+        return self.viewer.get_array(), reward, done, {"state":np.array(state, dtype=np.float32)}
+            self.viewer.window.activate()
+            self.viewer.draw_polygon(p, color=(0,0,0))
+            self.viewer.draw_circle(f.shape.radius, 20, color=obj.color1).add_attr(t)
+            self.viewer.draw_circle(f.shape.radius, 20, color=obj.color2, filled=False, linewidth=2).add_attr(t)
+            self.viewer.draw_polygon(path, color=obj.color1)
+            self.viewer.draw_polyline(path, color=obj.color2, linewidth=2)
+            self.viewer.draw_polyline( [(x, flagy1), (x, flagy2)], color=(1,1,1) )
+            self.viewer.draw_polygon( [(x, flagy2), (x, flagy2-10/SCALE), (x+25/SCALE, flagy2-5/SCALE)], color=(0.8,0.8,0) )
+        return self.viewer.render(return_rgb_array = mode=='rgb_array')
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
+
+Offscreen rendering with pygame: https://stackoverflow.com/questions/21441217/how-to-draw-to-an-off-screen-display-in-pygame
+Numpy array from pygame: https://stackoverflow.com/questions/34673424/how-to-get-numpy-array-of-rgb-colors-from-pygame-surface
+    imgdata = pygame.surfarray.array3d(img)
+    imgdata.swapaxes(0,1)
+"""
 
 RAD2DEG = 57.29577951308232
 
@@ -43,11 +67,12 @@ def get_display(spec):
         raise error.Error('Invalid display specification: {}. (Must be a string like :0 or None.)'.format(spec))
 
 class Viewer(object):
-    def __init__(self, width, height, display=None, visible=True):
+    def __init__(self, width, height, scale, display=None, visible=True):
         display = get_display(display)
 
         self.width = width
         self.height = height
+        self.scale = scale
         self.window = pyglet.window.Window(width=width, height=height, display=display, visible=visible)
         self.window.on_close = self.window_closed_by_user
         self.isopen = True
@@ -55,8 +80,8 @@ class Viewer(object):
         self.onetime_geoms = []
         self.transform = Transform()
 
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        self.image = pygame.Surface( (width, height) )
+        self.image.fill( (1,1,1) )
 
     def close(self):
         self.window.close()
@@ -79,93 +104,72 @@ class Viewer(object):
         self.onetime_geoms.append(geom)
 
     def render(self, return_rgb_array=False):
-        glClearColor(1,1,1,1)
-        if not self.window.visible:
-            self.window.set_visible(True)
-        self.window.clear()
-        self.window.switch_to()
-        self.window.dispatch_events()
-        self.transform.enable()
+        self.image.fill( (1,1,1) )
+        #self.transform.enable()
         for geom in self.geoms:
-            geom.render()
+            geom.render(self.image)
         for geom in self.onetime_geoms:
-            geom.render()
-        self.transform.disable()
+            geom.render(self.image)
+        #self.transform.disable()
         arr = None
         if return_rgb_array:
-            buffer = pyglet.image.get_buffer_manager().get_color_buffer()
-            image_data = buffer.get_image_data()
-            arr = np.fromstring(image_data.data, dtype=np.uint8, sep='')
-            # In https://github.com/openai/gym-http-api/issues/2, we
-            # discovered that someone using Xmonad on Arch was having
-            # a window of size 598 x 398, though a 600 x 400 window
-            # was requested. (Guess Xmonad was preserving a pixel for
-            # the boundary.) So we use the buffer height/width rather
-            # than the requested one.
-            arr = arr.reshape(buffer.height, buffer.width, 4)
-            arr = arr[::-1,:,0:3]
-        self.window.flip()
+            arr = self.get_array()
         self.onetime_geoms = []
         return arr if return_rgb_array else self.isopen
 
     # Convenience
-    def draw_circle(self, radius=10, res=30, filled=True, **attrs):
-        geom = make_circle(radius=radius, res=res, filled=filled)
+    def draw_circle(self, center, radius=10, res=30, filled=True, **attrs):
+        geom = make_circle(center=center, radius=radius, res=res, filled=filled, scale=self.scale)
         _add_attrs(geom, attrs)
         self.add_onetime(geom)
         return geom
 
     def draw_polygon(self, v, filled=True, **attrs):
-        geom = make_polygon(v=v, filled=filled)
+        geom = make_polygon(v=v, filled=filled, scale=self.scale)
         _add_attrs(geom, attrs)
         self.add_onetime(geom)
         return geom
 
     def draw_polyline(self, v, **attrs):
-        geom = make_polyline(v=v)
+        geom = make_polyline(v=v, scale=self.scale)
         _add_attrs(geom, attrs)
         self.add_onetime(geom)
         return geom
 
     def draw_line(self, start, end, **attrs):
-        geom = Line(start, end)
+        geom = Line(start, end, scale=self.scale)
         _add_attrs(geom, attrs)
         self.add_onetime(geom)
         return geom
 
     def get_array(self):
-        self.window.flip()
-        image_data = pyglet.image.get_buffer_manager().get_color_buffer().get_image_data()
-        self.window.flip()
-        arr = np.fromstring(image_data.data, dtype=np.uint8, sep='')
-        arr = arr.reshape(self.height, self.width, 4)
-        return arr[::-1,:,0:3]
+        imgdata = pygame.surfarray.array3d(self.image)
+        #imgdata = imgdata.swapaxes(0,1)
+        imgdata = np.transpose(imgdata, (1,0,2) )
+        imgdata = np.flip(imgdata, axis=0 )
+        return imgdata
 
     def __del__(self):
         self.close()
 
-def _add_attrs(geom, attrs):
-    if "color" in attrs:
-        geom.set_color(*attrs["color"])
-    if "linewidth" in attrs:
-        geom.set_linewidth(attrs["linewidth"])
+def make_circle(center, radius=10, res=30, filled=True, scale=1):
+    return Circle(radius, center, filled, scale)
 
-class Geom(object):
-    def __init__(self):
-        self._color=Color((0, 0, 0, 1.0))
-        self.attrs = [self._color]
-    def render(self):
-        for attr in reversed(self.attrs):
-            attr.enable()
-        self.render1()
-        for attr in self.attrs:
-            attr.disable()
-    def render1(self):
-        raise NotImplementedError
-    def add_attr(self, attr):
-        self.attrs.append(attr)
-    def set_color(self, r, g, b):
-        self._color.vec4 = (r, g, b, 1)
+def make_polygon(v, filled=True, scale=1):
+    if filled: return FilledPolygon(v, scale=scale)
+    else: return PolyLine(v, True, scale=scale)
+
+def make_polyline(v, scale=1):
+    return PolyLine(v, False, scale=scale)
+
+def make_capsule(length, width):
+    l, r, t, b = 0, length, width/2, -width/2
+    box = make_polygon([(l,b), (l,t), (r,t), (r,b)])
+    circ0 = make_circle(width/2)
+    circ1 = make_circle(width/2)
+    circ1.add_attr(Transform(translation=(length, 0)))
+    geom = Compound([box, circ0, circ1])
+    return geom
 
 class Attr(object):
     def enable(self):
@@ -213,90 +217,98 @@ class LineWidth(Attr):
     def enable(self):
         glLineWidth(self.stroke)
 
-class Point(Geom):
-    def __init__(self):
-        Geom.__init__(self)
-    def render1(self):
-        glBegin(GL_POINTS) # draw point
-        glVertex3f(0.0, 0.0, 0.0)
-        glEnd()
 
-class FilledPolygon(Geom):
+def _add_attrs(geom, attrs):
+    if "color" in attrs:
+        geom.set_color(*attrs["color"])
+    if "linewidth" in attrs:
+        geom.set_linewidth(attrs["linewidth"])
+
+class Geom(object):
+    def __init__(self):
+        self._color=(0, 0, 0, 255)
+        self._linewidth = 1
+        self.attrs = [self._color]
+        self.filled = False
+    def render(self, image):
+        self.render1(image)
+    def render1(self, image):
+        raise NotImplementedError
+    def add_attr(self, attr):
+        self.attrs.append(attr)
+    def set_color(self, r, g, b):
+        self._color = np.clip( [int(255.0*r), int(255.0*g), int(255.0*b), 255], 0, 255 )
+    def set_linewidth(self, w):
+        self._linewidth = w
+    def linewidth(self):
+        if self.filled:
+            return 0
+        return self._linewidth
+
+class Point(Geom):
     def __init__(self, v):
         Geom.__init__(self)
-        self.v = v
-    def render1(self):
-        if   len(self.v) == 4 : glBegin(GL_QUADS)
-        elif len(self.v)  > 4 : glBegin(GL_POLYGON)
-        else: glBegin(GL_TRIANGLES)
-        for p in self.v:
-            glVertex3f(p[0], p[1],0)  # draw each vertex
-        glEnd()
+        self.center = v
+        self.radius = 1.0
+        self.filled = True
+    def render1(self,image):
+        pygame.draw.circle(image, self._color, self.center, self.radius, self.linewidth())
 
-def make_circle(radius=10, res=30, filled=True):
-    points = []
-    for i in range(res):
-        ang = 2*math.pi*i / res
-        points.append((math.cos(ang)*radius, math.sin(ang)*radius))
-    if filled:
-        return FilledPolygon(points)
-    else:
-        return PolyLine(points, True)
+class Circle(Geom):
+    def __init__(self, r, c, filled=True, scale=1):
+        Geom.__init__(self)
+        #print( "c/c/r/w: {} {} {} {}".format( self._color, c, r, self.linewidth() ) )
+        self.radius = max(1,round(r*scale))
+        self.center = (round(c[0]*scale), round(c[1]*scale) )
+        self.filled = filled
+        self._linewidth = 1
+        self._color = (255,255,255,255)
+    def render1(self, image):
+        try:
+            pygame.draw.circle(image, self._color, self.center, self.radius, self.linewidth())
+        except TypeError as e:
+            print( "c/c/r/w: {} {} {} {}".format( self._color, self.center, self.radius, self.linewidth() ) )
+            raise e
+    def set_linewidth(self,w):
+        if w > self.radius:
+            w = self.radius
+        super(Circle, self).set_linewidth(w)
 
-def make_polygon(v, filled=True):
-    if filled: return FilledPolygon(v)
-    else: return PolyLine(v, True)
-
-def make_polyline(v):
-    return PolyLine(v, False)
-
-def make_capsule(length, width):
-    l, r, t, b = 0, length, width/2, -width/2
-    box = make_polygon([(l,b), (l,t), (r,t), (r,b)])
-    circ0 = make_circle(width/2)
-    circ1 = make_circle(width/2)
-    circ1.add_attr(Transform(translation=(length, 0)))
-    geom = Compound([box, circ0, circ1])
-    return geom
+class FilledPolygon(Geom):
+    def __init__(self, v, scale=1):
+        Geom.__init__(self)
+        self.v = np.array(v) * scale
+        self.filled = True
+    def render1(self, image):
+        pygame.draw.polygon(image, self._color, self.v, self.linewidth())
 
 class Compound(Geom):
     def __init__(self, gs):
         Geom.__init__(self)
         self.gs = gs
-        for g in self.gs:
-            g.attrs = [a for a in g.attrs if not isinstance(a, Color)]
     def render1(self):
         for g in self.gs:
             g.render()
 
 class PolyLine(Geom):
-    def __init__(self, v, close):
+    def __init__(self, v, close, scale=1):
         Geom.__init__(self)
-        self.v = v
+        self.v = np.array(v) * scale
         self.close = close
-        self.linewidth = LineWidth(1)
-        self.add_attr(self.linewidth)
-    def render1(self):
-        glBegin(GL_LINE_LOOP if self.close else GL_LINE_STRIP)
-        for p in self.v:
-            glVertex3f(p[0], p[1],0)  # draw each vertex
-        glEnd()
-    def set_linewidth(self, x):
-        self.linewidth.stroke = x
+        self._linewidth = 1
+        self.filled = False
+    def render1(self,image):
+        pygame.draw.lines(image, self._color, self.close, self.v, self.linewidth())
 
 class Line(Geom):
-    def __init__(self, start=(0.0, 0.0), end=(0.0, 0.0)):
+    def __init__(self, start=(0.0, 0.0), end=(0.0, 0.0), scale=1):
         Geom.__init__(self)
         self.start = start
         self.end = end
-        self.linewidth = LineWidth(1)
-        self.add_attr(self.linewidth)
-
-    def render1(self):
-        glBegin(GL_LINES)
-        glVertex2f(*self.start)
-        glVertex2f(*self.end)
-        glEnd()
+        self._linewidth = 2
+        self.filled = False
+    def render1(self,image):
+        pygame.draw.line(image, self_color, self.start, self.end, self.linewidth())
 
 class Image(Geom):
     def __init__(self, fname, width, height):

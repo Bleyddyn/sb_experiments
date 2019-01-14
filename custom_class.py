@@ -1,8 +1,9 @@
 import tensorflow as tf
+import numpy as np
 
 from stable_baselines.common.policies import ActorCriticPolicy, register_policy, nature_cnn
 from stable_baselines.a2c.utils import conv, linear, conv_to_fc
-
+from stable_baselines.ddpg.policies import FeedForwardPolicy
 
 def dk_cnn(scaled_images, **kwargs):
     """
@@ -33,12 +34,12 @@ class CustomMalpiPolicy(ActorCriticPolicy):
             extracted_features = tf.layers.flatten(extracted_features)
 
             pi_h = extracted_features
-            for i, layer_size in enumerate([128, 128, 128]):
+            for i, layer_size in enumerate([128]):
                 pi_h = activ(tf.layers.dense(pi_h, layer_size, name='pi_fc' + str(i)))
             pi_latent = pi_h
 
             vf_h = extracted_features
-            for i, layer_size in enumerate([32, 32]):
+            for i, layer_size in enumerate([32]):
                 vf_h = activ(tf.layers.dense(vf_h, layer_size, name='vf_fc' + str(i)))
             value_fn = tf.layers.dense(vf_h, 1, name='vf')
             vf_latent = vf_h
@@ -62,3 +63,21 @@ class CustomMalpiPolicy(ActorCriticPolicy):
 
 # Register the policy, it will check that the name is not already taken
 #register_policy('CustomMalpiPolicy', CustomMalpiPolicy)
+
+class DDPGDKPolicy(FeedForwardPolicy):
+    """
+    Policy object that implements actor critic, using a CNN (the nature CNN)
+    :param sess: (TensorFlow session) The current TensorFlow session
+    :param ob_space: (Gym Space) The observation space of the environment
+    :param ac_space: (Gym Space) The action space of the environment
+    :param n_env: (int) The number of environments to run
+    :param n_steps: (int) The number of steps to run for each environment
+    :param n_batch: (int) The number of batch to run (n_envs * n_steps)
+    :param reuse: (bool) If the policy is reusable or not
+    :param _kwargs: (dict) Extra keyword arguments for the nature CNN feature extraction
+    """
+
+    def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, **_kwargs):
+        super(DDPGDKPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse,
+                                        cnn_extractor=dk_cnn, feature_extraction="cnn", **_kwargs)
+

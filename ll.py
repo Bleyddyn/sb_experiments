@@ -19,7 +19,7 @@ for i in range(1000):
     if (30 == i) or (60 == i) or (90 == i):
         print( "Append obs: {}".format(i) )
         obses.append( obs.copy() )
-    #env.render()
+    env.render()
     #rgb = env.render(mode="rgb_array")
 #print( rgb.shape )
 print( obs.shape )
