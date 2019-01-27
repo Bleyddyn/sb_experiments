@@ -1,5 +1,7 @@
 """
-2D rendering framework
+This is based on Open AI's rendering code, replacing pyglet with pygame.
+For an image based LunarLander I needed to be able to draw to an off-screen surface,
+which pyglet doesn't support.
 """
 from __future__ import division
 import os
@@ -14,16 +16,6 @@ if "Apple" in sys.version:
 from gym.utils import reraise
 from gym import error
 import pygame
-
-try:
-    import pyglet
-except ImportError as e:
-    reraise(suffix="HINT: you can install pyglet directly via 'pip install pyglet'. But if you really just want to install all Gym dependencies and not have to think about it, 'pip install -e .[all]' or 'pip install gym[all]' will do it.")
-
-try:
-    from pyglet.gl import *
-except ImportError as e:
-    reraise(prefix="Error occured while running `from pyglet.gl import *`",suffix="HINT: make sure you have OpenGL install. On Ubuntu, you can run 'apt-get install python-opengl'. If you're running on a server, you may need a virtual frame buffer; something like this should work: 'xvfb-run -s \"-screen 0 1400x900x24\" python <your_script.py>'")
 
 import math
 import numpy as np
@@ -53,35 +45,20 @@ Numpy array from pygame: https://stackoverflow.com/questions/34673424/how-to-get
 
 RAD2DEG = 57.29577951308232
 
-def get_display(spec):
-    """Convert a display specification (such as :0) into an actual Display
-    object.
-
-    Pyglet only supports multiple Displays on Linux.
-    """
-    if spec is None:
-        return None
-    elif isinstance(spec, six.string_types):
-        return pyglet.canvas.Display(spec)
-    else:
-        raise error.Error('Invalid display specification: {}. (Must be a string like :0 or None.)'.format(spec))
+pygame.init()
 
 class Viewer(object):
     def __init__(self, width, height, scale, display=None, visible=True):
-        display = get_display(display)
-
         self.width = width
         self.height = height
         self.scale = scale
-        self.window = pyglet.window.Window(width=width, height=height, display=display, visible=visible)
-        self.window.on_close = self.window_closed_by_user
+        self.window = None
         self.isopen = True
         self.geoms = []
         self.onetime_geoms = []
-        self.transform = Transform()
 
         self.image = pygame.Surface( (width, height) )
-        self.image.fill( (1,1,1) )
+        self.image.fill( pygame.Color(255,255,255) )
 
     def close(self):
         self.window.close()
@@ -93,9 +70,6 @@ class Viewer(object):
         assert right > left and top > bottom
         scalex = self.width/(right-left)
         scaley = self.height/(top-bottom)
-        self.transform = Transform(
-            translation=(-left*scalex, -bottom*scaley),
-            scale=(scalex, scaley))
 
     def add_geom(self, geom):
         self.geoms.append(geom)
@@ -103,18 +77,32 @@ class Viewer(object):
     def add_onetime(self, geom):
         self.onetime_geoms.append(geom)
 
-    def render(self, return_rgb_array=False):
-        self.image.fill( (1,1,1) )
-        #self.transform.enable()
+    def draw(self):
+        ret = self.image.fill( pygame.Color(255,255,255) )
         for geom in self.geoms:
             geom.render(self.image)
         for geom in self.onetime_geoms:
             geom.render(self.image)
-        #self.transform.disable()
+        arr = self.get_array()
+        self.onetime_geoms = []
+        return arr
+
+    def render(self, return_rgb_array=False):
+        if not self.window:
+            self.window = pygame.display.set_mode([self.width,self.height])
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        self.window.fill( (60,60,60) )
+        self.window.blit( pygame.transform.flip(self.image,False,True), (0,0) )
+        pygame.display.flip()
+        pygame.display.update()
         arr = None
         if return_rgb_array:
             arr = self.get_array()
-        self.onetime_geoms = []
         return arr if return_rgb_array else self.isopen
 
     # Convenience
@@ -162,39 +150,11 @@ def make_polygon(v, filled=True, scale=1):
 def make_polyline(v, scale=1):
     return PolyLine(v, False, scale=scale)
 
-def make_capsule(length, width):
-    l, r, t, b = 0, length, width/2, -width/2
-    box = make_polygon([(l,b), (l,t), (r,t), (r,b)])
-    circ0 = make_circle(width/2)
-    circ1 = make_circle(width/2)
-    circ1.add_attr(Transform(translation=(length, 0)))
-    geom = Compound([box, circ0, circ1])
-    return geom
-
 class Attr(object):
     def enable(self):
         raise NotImplementedError
     def disable(self):
         pass
-
-class Transform(Attr):
-    def __init__(self, translation=(0.0, 0.0), rotation=0.0, scale=(1,1)):
-        self.set_translation(*translation)
-        self.set_rotation(rotation)
-        self.set_scale(*scale)
-    def enable(self):
-        glPushMatrix()
-        glTranslatef(self.translation[0], self.translation[1], 0) # translate to GL loc ppint
-        glRotatef(RAD2DEG * self.rotation, 0, 0, 1.0)
-        glScalef(self.scale[0], self.scale[1], 1)
-    def disable(self):
-        glPopMatrix()
-    def set_translation(self, newx, newy):
-        self.translation = (float(newx), float(newy))
-    def set_rotation(self, new):
-        self.rotation = float(new)
-    def set_scale(self, newx, newy):
-        self.scale = (float(newx), float(newy))
 
 class Color(Attr):
     def __init__(self, vec4):
@@ -311,64 +271,18 @@ class Line(Geom):
         pygame.draw.line(image, self_color, self.start, self.end, self.linewidth())
 
 class Image(Geom):
+    """ This class has not been tested. """
     def __init__(self, fname, width, height):
         Geom.__init__(self)
         self.width = width
         self.height = height
-        img = pyglet.image.load(fname)
+        img = pygame.image.load(fname)
         self.img = img
         self.flip = False
-    def render1(self):
-        self.img.blit(-self.width/2, -self.height/2, width=self.width, height=self.height)
+    def render1(self,image):
+        dest = (0,0), # (-self.width/2, -self.height/2, width=self.width, height=self.height)
+        img = self.img
+        if self.flip:
+            img = pygame.transform.flip(img,False,True)
+        image.blit( img, dest )
 
-# ================================================================
-
-class SimpleImageViewer(object):
-    def __init__(self, display=None, maxwidth=500):
-        self.window = None
-        self.isopen = False
-        self.display = display
-        self.maxwidth = maxwidth
-    def imshow(self, arr):
-        if self.window is None:
-            height, width, _channels = arr.shape
-            if width > self.maxwidth:
-                scale = self.maxwidth / width
-                width = int(scale * width)
-                height = int(scale * height)
-            self.window = pyglet.window.Window(width=width, height=height, 
-                display=self.display, vsync=False, resizable=True)            
-            self.width = width
-            self.height = height
-            self.isopen = True
-
-            @self.window.event
-            def on_resize(width, height):
-                self.width = width
-                self.height = height
-
-            @self.window.event
-            def on_close():
-                self.isopen = False
-
-        assert len(arr.shape) == 3, "You passed in an image with the wrong number shape"
-        image = pyglet.image.ImageData(arr.shape[1], arr.shape[0], 
-            'RGB', arr.tobytes(), pitch=arr.shape[1]*-3)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, 
-            gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-        texture = image.get_texture()
-        texture.width = self.width
-        texture.height = self.height
-        self.window.clear()
-        self.window.switch_to()
-        self.window.dispatch_events()
-        texture.blit(0, 0) # draw
-        self.window.flip()
-    def close(self):
-        if self.isopen and sys.meta_path:
-            # ^^^ check sys.meta_path to avoid 'ImportError: sys.meta_path is None, Python is likely shutting down'
-            self.window.close()
-            self.isopen = False
-
-    def __del__(self):
-        self.close()

@@ -74,6 +74,11 @@ class ContactDetector(contactListener):
                 self.env.legs[i].ground_contact = False
 
 class LunarLanderImage(gym.Env, EzPickle):
+    """ Modified version of the OpenAI gym LunarLander environment that returns images
+        as the observations, instead of location/velocity data. Original state data is
+        returned in the 'state' entry of the info object from the step method.
+    """
+
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second' : FPS
@@ -325,13 +330,10 @@ class LunarLanderImage(gym.Env, EzPickle):
             done   = True
             reward = +100
 
+        self._draw()
         return self.viewer.get_array(), reward, done, {"state":np.array(state, dtype=np.float32)}
 
-    def render(self, mode='human'):
-        if self.first_render:
-            self.viewer.window.activate()
-            self.first_render = False
-
+    def _draw(self):
         for obj in self.particles:
             obj.ttl -= 0.15
             obj.color1 = (max(0.2,0.2+obj.ttl), max(0.2,0.5*obj.ttl), max(0.2,0.5*obj.ttl))
@@ -363,6 +365,9 @@ class LunarLanderImage(gym.Env, EzPickle):
             self.viewer.draw_polyline( [(x, flagy1), (x, flagy2)], color=(1,1,1) )
             self.viewer.draw_polygon( [(x, flagy2), (x, flagy2-10/SCALE), (x+25/SCALE, flagy2-5/SCALE)], color=(0.8,0.8,0) )
 
+        return self.viewer.draw()
+
+    def render(self, mode='human'):
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
 
     def close(self):
