@@ -4,7 +4,7 @@ import gym
 import numpy as np
 import matplotlib.pyplot as plt
 
-from stable_baselines.ddpg.policies import MlpPolicy
+from stable_baselines.ddpg.policies import MlpPolicy, CnnPolicy
 from stable_baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from stable_baselines.common.cmd_util import make_atari_env
 from stable_baselines.common.atari_wrappers import make_atari, wrap_deepmind, NoopResetEnv, EpisodicLifeEnv, FireResetEnv, WarpFrame, ScaledFloatFrame, ClipRewardEnv, FrameStack
@@ -33,7 +33,7 @@ def callback(_locals, _globals):
   :param _globals: (dict)
   """
   global n_steps, best_mean_reward
-  # Print stats every 1000 calls
+  log_dir = logger.get_dir()
   if (n_steps + 1) % 1000 == 0:
       # Evaluate policy performance
       x, y = ts2xy(load_results(log_dir), 'timesteps')
@@ -42,12 +42,13 @@ def callback(_locals, _globals):
           print(x[-1], 'timesteps')
           print("Best mean reward: {:.2f} - Last mean reward per episode: {:.2f}".format(best_mean_reward, mean_reward))
 
-          # New best model, you could save the agent here
           if mean_reward > best_mean_reward:
               best_mean_reward = mean_reward
               # Example for saving best model
-              print("Saving new best model")
-              _locals['self'].save(log_dir + 'best_model.pkl')
+              fname = os.path.join(log_dir, 'best_model.pkl')
+              print("Saving new best model to {}".format(fname))
+              _locals['self'].save( fname )
+
   n_steps += 1
   return True
 
@@ -123,14 +124,31 @@ def make_env_simplified( env_id, seed, wrapper_kwargs=None, allow_early_resets=T
     env = Monitor(env, logger.get_dir(), allow_early_resets=allow_early_resets)
     return wrap_deepmind_fixed(env, episode_life=False, **wrapper_kwargs)
 
-# Create log dir
-log_dir = "./logs/"
-#os.makedirs(log_dir, exist_ok=True)
-logger.configure(folder=log_dir, format_strs=['stdout', 'log', 'csv','tensorboard'])
+def test_ll(env_name, random_seed, saved_model=None, total_steps=200000):
+# Create and wrap the environment
+    env = make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True})
+    env = DummyVecEnv([lambda: env])
 
+# Add some param noise for exploration
+    param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
+    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(1e5), verbose=0)
+    if saved_model is not None:
+        model.load(saved_model)
+# Train the agent
+    model.learn(total_timesteps=total_steps, callback=callback)
+
+log_dir = None
+saved_model = "saved_lli_model.pkl" # None
 num_procs = 1
 random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
+
+logger.configure(folder=log_dir, format_strs=['stdout', 'log', 'csv','tensorboard'])
+log_dir = logger.get_dir()
+
+test_ll(env_names[0], random_seed, saved_model=saved_model, total_steps = 3000)
+exit()
+
 envs = []
 for env_name in env_names:
     envs.append( make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True}) )
@@ -150,16 +168,3 @@ for epoch in range(epochs):
     for idx, env in enumerate(envs):
         test_env( model, env, env_names[idx] )
 
-"""
-
-# Create and wrap the environment
-env = gym.make('LunarLanderContinuous-v2')
-env = Monitor(env, log_dir, allow_early_resets=True)
-env = DummyVecEnv([lambda: env])
-
-# Add some param noise for exploration
-param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
-model = DDPG(MlpPolicy, env, param_noise=param_noise, memory_limit=int(1e6), verbose=0)
-# Train the agent
-model.learn(total_timesteps=200000, callback=callback)
-"""
