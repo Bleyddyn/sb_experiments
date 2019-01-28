@@ -21,10 +21,13 @@ def test(env, render=True):
     env.reset()
     obses = []
     rewards = []
+    ep_rew = []
     for i in range(1000):
         obs, reward, done, info = env.step( env.action_space.sample() )
-        rewards.append( reward )
+        ep_rew.append( reward )
         if done:
+            rewards.append( np.sum(ep_rew) )
+            ep_rew = []
             env.reset()
         if (30 == i) or (60 == i) or (90 == i):
             print( "Append obs: {}".format(i) )
@@ -44,5 +47,5 @@ print( "{} frames per second".format( 1000.0 / elapsed.total_seconds() ) )
 print( "Reward: {}".format( np.mean(rew[-100:]) ) )
 
 #show_mult_obs( obs )
-plt.plot(rew)
+plt.plot(rew[-100:])
 plt.show()

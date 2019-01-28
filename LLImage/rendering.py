@@ -45,8 +45,6 @@ Numpy array from pygame: https://stackoverflow.com/questions/34673424/how-to-get
 
 RAD2DEG = 57.29577951308232
 
-pygame.init()
-
 class Viewer(object):
     def __init__(self, width, height, scale, display=None, visible=True):
         self.width = width
@@ -61,7 +59,8 @@ class Viewer(object):
         self.image.fill( pygame.Color(255,255,255) )
 
     def close(self):
-        self.window.close()
+        if self.window is not None:
+            self.window.close()
 
     def window_closed_by_user(self):
         self.isopen = False
@@ -89,6 +88,7 @@ class Viewer(object):
 
     def render(self, return_rgb_array=False):
         if not self.window:
+            pygame.init()
             self.window = pygame.display.set_mode([self.width,self.height])
 
         for event in pygame.event.get():
