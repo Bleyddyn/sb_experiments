@@ -129,11 +129,15 @@ def test_ll(env_name, random_seed, saved_model=None, total_steps=200000):
     env = make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True})
     env = DummyVecEnv([lambda: env])
 
+    tb_dir = os.path.join( logger.get_dir(), "td/" )
+
 # Add some param noise for exploration
     param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
-    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(1e5), verbose=0)
+    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(1e5), verbose=0, tensorboard_log=tb_dir)
     if saved_model is not None:
-        model.load(saved_model)
+        # model = DDPG.load(saved_model, tensorboard_log=tb_dir) #this is how it's done in the docs?
+        model.load(saved_model, tensorboard_log=tb_dir)
+
 # Train the agent
     model.learn(total_timesteps=total_steps, callback=callback)
 
