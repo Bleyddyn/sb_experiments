@@ -37,6 +37,7 @@ import numpy as np
             self.viewer.close()
             self.viewer = None
 
+pygame docs: https://www.pygame.org/docs/ref/surface.html#pygame.Surface.blit
 Offscreen rendering with pygame: https://stackoverflow.com/questions/21441217/how-to-draw-to-an-off-screen-display-in-pygame
 Numpy array from pygame: https://stackoverflow.com/questions/34673424/how-to-get-numpy-array-of-rgb-colors-from-pygame-surface
     imgdata = pygame.surfarray.array3d(img)

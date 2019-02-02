@@ -93,6 +93,21 @@ def make_atari_single_env(env_id, num_env, seed, wrapper_kwargs=None, start_inde
     set_global_seeds(seed)
     return DummyVecEnv([make_env(i + start_index) for i in range(num_env)])
 
+class WrapCarRacing(gym.Wrapper):
+    def __init__(self, env):
+        """
+        Wrap the CarRacing environment action space so it is symmetric and will work with DDPG.
+
+        :param env: (Gym Environment) the environment to wrap
+        """
+        gym.Wrapper.__init__(self, env)
+        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=env.action_space.shape, dtype=np.float32)
+
+    def step(self, action):
+        action[1:] = (action[1:] + 1.0) / 2.0
+        obs, reward, done, info = self.env.step(action)
+        return obs, reward, done, info
+
 def wrap_deepmind_fixed(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
     """
     Configure environment for DeepMind-style Atari.
@@ -127,26 +142,41 @@ def make_env_simplified( env_id, seed, wrapper_kwargs=None, allow_early_resets=T
 def test_ll(env_name, random_seed, saved_model=None, total_steps=200000):
 # Create and wrap the environment
     env = make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True})
+    if "CarRacing-v0" == env_name:
+        print( "Wrapping" )
+        env = WrapCarRacing(env)
     env = DummyVecEnv([lambda: env])
+
+    ac_space = env.action_space
+    print( "Environment: " )
+    print( "  obs space: {}".format( env.observation_space ) )
+    print( "  act space: {} {}-{}".format( ac_space, ac_space.low, ac_space.high ) )
+
+    assert isinstance(ac_space, gym.spaces.Box), "Error: the action space must be of type gym.spaces.Box"
+    assert (np.abs(ac_space.low) == ac_space.high).all(), "Error: the action space low and high must be symmetric"
 
 # Add some param noise for exploration
     param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
-    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(1e5), verbose=0)
+    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(2e5), verbose=0)
     if saved_model is not None:
+        print( "Loading saved model: {}".format( saved_model ) )
         model.load(saved_model)
 # Train the agent
     model.learn(total_timesteps=total_steps, callback=callback)
 
 log_dir = None
-saved_model = "saved_lli_model.pkl" # None
 num_procs = 1
 random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
+env_name = env_names[1]
+saved_model = os.path.join( env_name, "best_model.pkl" )
+if not os.path.exists(saved_model):
+    saved_model = None
 
 logger.configure(folder=log_dir, format_strs=['stdout', 'log', 'csv','tensorboard'])
 log_dir = logger.get_dir()
 
-test_ll(env_names[0], random_seed, saved_model=saved_model, total_steps = 3000)
+test_ll(env_name, random_seed, saved_model=saved_model, total_steps = 200000)
 exit()
 
 envs = []
