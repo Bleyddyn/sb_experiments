@@ -12,7 +12,7 @@ from stable_baselines.common import set_global_seeds
 from stable_baselines.bench import Monitor
 from stable_baselines import logger
 from stable_baselines.results_plotter import load_results, ts2xy
-from stable_baselines import DDPG
+from stable_baselines import DDPG, PPO2
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec
 
 from print_versions import printVersions
@@ -37,6 +37,8 @@ def callback(_locals, _globals):
   if (n_steps + 1) % 1000 == 0:
       # Evaluate policy performance
       x, y = ts2xy(load_results(log_dir), 'timesteps')
+      print( "Log dir: {}".format( log_dir ) )
+      print( "x/y".format( len(x), type(y) ) )
       if len(x) > 0:
           mean_reward = np.mean(y[-100:])
           print(x[-1], 'timesteps')
@@ -155,12 +157,41 @@ def test_ll(env_name, random_seed, saved_model=None, total_steps=200000):
     assert isinstance(ac_space, gym.spaces.Box), "Error: the action space must be of type gym.spaces.Box"
     assert (np.abs(ac_space.low) == ac_space.high).all(), "Error: the action space low and high must be symmetric"
 
+    tb_dir = os.path.join( logger.get_dir(), "td/" )
+
 # Add some param noise for exploration
     param_noise = AdaptiveParamNoiseSpec(initial_stddev=0.2, desired_action_stddev=0.2)
-    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(2e5), verbose=0)
+    model = DDPG(CnnPolicy, env, param_noise=param_noise, memory_limit=int(2e5), verbose=0, tensorboard_log=tb_dir)
     if saved_model is not None:
-        print( "Loading saved model: {}".format( saved_model ) )
-        model.load(saved_model)
+        model = DDPG.load(saved_model, tensorboard_log=tb_dir) #this is how it's done in the docs?
+        #model.load(saved_model, tensorboard_log=tb_dir)
+
+# Train the agent
+    model.learn(total_timesteps=total_steps, callback=callback)
+
+def test_ppo(env_name, random_seed, num_env=2, saved_model=None, total_steps=200000):
+# Create and wrap the environment
+    env = make_atari_env(env_name, 2, random_seed)
+
+    #env = make_env_simplified(env_name, seed=random_seed, wrapper_kwargs={"scale":True})
+    if "CarRacing-v0" == env_name:
+        print( "Wrapping" )
+        env = WrapCarRacing(env)
+    #env = DummyVecEnv([lambda: env])
+
+    ac_space = env.action_space
+    print( "Environment: " )
+    print( "  obs space: {}".format( env.observation_space ) )
+    #print( "  act space: {} {}-{}".format( ac_space, ac_space.low, ac_space.high ) )
+
+#    assert isinstance(ac_space, gym.spaces.Box), "Error: the action space must be of type gym.spaces.Box"
+#    assert (np.abs(ac_space.low) == ac_space.high).all(), "Error: the action space low and high must be symmetric"
+
+    tb_dir = os.path.join( logger.get_dir(), "tb/" )
+
+# Add some param noise for exploration
+    model = PPO2(stable_baselines.common.policies.CnnPolicy, env, verbose=0, tensorboard_log=tb_dir)
+
 # Train the agent
     model.learn(total_timesteps=total_steps, callback=callback)
 
@@ -168,7 +199,7 @@ log_dir = None
 num_procs = 1
 random_seed = 0
 env_names = ["LunarLanderImageContinuous-v2", "CarRacing-v0"]
-env_name = env_names[1]
+env_name = "BreakoutNoFrameskip-v4" #env_names[1]
 saved_model = os.path.join( env_name, "best_model.pkl" )
 if not os.path.exists(saved_model):
     saved_model = None
@@ -176,7 +207,8 @@ if not os.path.exists(saved_model):
 logger.configure(folder=log_dir, format_strs=['stdout', 'log', 'csv','tensorboard'])
 log_dir = logger.get_dir()
 
-test_ll(env_name, random_seed, saved_model=saved_model, total_steps = 200000)
+#test_ll(env_name, random_seed, saved_model=saved_model, total_steps = 200000)
+test_ppo(env_name, random_seed, saved_model=None, total_steps = 2000000)
 exit()
 
 envs = []
